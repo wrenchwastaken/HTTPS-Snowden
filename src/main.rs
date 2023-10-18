@@ -1,55 +1,68 @@
-// Uncomment this block to pass the first stage
-use std::io::{BufRead, BufReader};
-use std::{io::Write, net::TcpListener};
+use std::io::{BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::str;
+
+use std::thread;
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
-                let reader = BufReader::new(&stream);
-                let mut lines = reader.lines();
-                let status_line = lines.next().unwrap().unwrap();
-                let path = status_line.split_whitespace().nth(1).unwrap();
-                let method = status_line.split_whitespace().nth(0).unwrap();
+            Ok(mut _stream) => {
+                println!("accepted new connection");
+                
 
-                println!("request method: {}", method);
-                if path == "/" {
-                    stream
-                        .write_all("HTTP/1.1 200 OK\r\n\r\n".as_bytes())
-                        .unwrap();
-                } else if path.starts_with("/echo") {
-                    let response_body = path.split("/echo/").nth(1).unwrap();
-                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}", response_body.len(), response_body);
-                    println!("{}", response);
-                    stream.write_all(response.as_bytes());
-                } else if path.starts_with("/user-agent") {
-                    let user_agent = lines
-                        .find(|line| line.as_ref().unwrap().starts_with("User-Agent:"))
-                        .map(|line_result| match line_result {
-                            Ok(line) => {
-                                let user_agent =
-                                    line.split("User-Agent: ").nth(1).unwrap_or_default();
-                                user_agent.to_string()
-                            }
-                            Err(_) => "Unknown User Agent".to_string(),
-                        })
-                        .unwrap();
-                    // let response_body = path.split("/user-agent").nth(1).unwrap();
-                    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}", user_agent.len(), user_agent);
-                    println!("response : \r\n{}", response);
+                thread::spawn(|| {
+                    let mut data: [u8; 1024] = [0; 1024];
+                
+                    let req = _stream.read(&mut data).unwrap();
 
-                    stream.write(response.as_bytes()).unwrap();
-                } else {
-                    stream
-                        .write("HTTP/1.1 404 Not Found\r\n\r\n".as_bytes())
-                        .unwrap();
-                }
+                    let str_req = str::from_utf8(&data[0..req]).unwrap();
+                
+                    handle_connection(str_req, _stream);
+
+                });
             }
             Err(e) => {
-                println!("error: {:?}", e);
+                println!("error: {}", e);
             }
         }
     }
+}
+fn get_path(str_req: &str) -> &str {
+    let f_line = str_req.lines().next().unwrap();
+    let path = f_line.split(" ").nth(1).unwrap();
+    path
+}
+fn handle_connection(str_req: &str, mut _stream: TcpStream) {
+    let path = get_path(str_req);
+    if path == "/" {
+        _stream.write(b"HTTP/1.1 200 OK\r\n\r\n").unwrap();
+    } else if path.starts_with("/echo/") {
+        let body_str = path.split("/echo/").nth(1).unwrap();
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+            body_str.len(),
+            body_str
+        );
+        _stream.write(resp.as_bytes());
+    } else if path.starts_with("/user-agent") {
+        let user_agent_data = str_req
+            .split("\r\n")
+            .find(|&x| x.contains("User-Ag"))
+            .unwrap()
+            .split(":")
+            .nth(1)
+            .unwrap()
+            .trim();
+        let resp = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+            user_agent_data.len(),
+            user_agent_data
+        );
+        _stream.write(resp.as_bytes()).unwrap();
+    } else {
+        _stream.write(b"HTTP/1.1 404 Not Found\r\n\r\n").unwrap();
+    };
+
 }
